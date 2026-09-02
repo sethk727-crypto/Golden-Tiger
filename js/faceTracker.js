@@ -5,7 +5,7 @@
 import {
   FilesetResolver,
   FaceLandmarker,
-} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+} from "../vendor/mediapipe/vision_bundle.mjs";
 import {
   MEDIAPIPE_WASM_BASE,
   FACE_LANDMARKER_MODEL_URL,

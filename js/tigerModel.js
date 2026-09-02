@@ -307,7 +307,8 @@ export function buildProceduralTiger(mapping) {
       new THREE.SphereGeometry(0.75, 16, 12),
       new THREE.MeshBasicMaterial({ color: 0x120a02 })
     );
-    pupil.position.set(side * 4.0, 1.6, 8.15);
+    // Proud of the eye surface so the slit reads from the front.
+    pupil.position.set(side * 4.0, 1.6, 8.55);
     pupil.scale.set(0.55, 1.0, 0.35);
     group.add(pupil);
     bindings.pupils.push(pupil);

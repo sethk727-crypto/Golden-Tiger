@@ -135,8 +135,6 @@ Stated plainly rather than silently degraded:
 - **Frame rate follows the camera.** Most phone browsers deliver 30 fps from
   `getUserMedia`; the debug overlay shows the real capture/render/tracking
   rates rather than promising 60.
-- **CDN loads at startup.** three.js and the MediaPipe model load from CDNs on
-  first visit (then cache). After that, everything is on-device.
 
 ## Repository layout
 
@@ -154,12 +152,19 @@ js/sceneRenderer.js   three.js stage: video bg, lighting, anchoring, green scree
 js/recorder.js        MediaRecorder + sidecar capture + share/download
 js/exporter.js        offline 4K re-render from a sidecar
 js/sidecar.js         sidecar serializer (pure, tested)
+vendor/               vendored runtime deps (see below)
 tests/                node --test suites
 ASSET_CONTRACT.md     what the final tiger asset must contain
 TESTING.md            manual on-device test checklist
 docs/NATIVE_IOS_PLAN.md  the phased native ARKit/RealityKit plan
 ```
 
-No third-party runtime dependencies are vendored or installed: three.js and
-MediaPipe are loaded from CDNs (justification: they are the de-facto standard
-web 3D and face-tracking stacks; vendoring them would only bloat the repo).
+**Dependency justification** (the standards require it in writing): two
+third-party runtime libraries are used, both vendored into `vendor/` at
+pinned versions rather than fetched from CDNs — `three` 0.160.1 (the
+de-facto standard web 3D renderer; writing raw WebGL here would be months of
+non-product work) and `@mediapipe/tasks-vision` 0.10.14 plus its
+`face_landmarker` model (the only production-grade in-browser face tracker
+that emits ARKit-named blendshapes). Vendoring means the deployed app makes
+**zero external network requests** — every byte is served from your own
+Vercel origin and all inference runs on-device.

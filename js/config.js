@@ -7,12 +7,11 @@ export const MODEL_PATH = null;
 // Path to the persona mapping file, tweakable without touching code.
 export const MAPPING_PATH = "./mapping.json";
 
-// MediaPipe FaceLandmarker runtime (CDN — the only network fetches the app makes;
-// everything after model load runs on-device in the browser).
-export const MEDIAPIPE_WASM_BASE =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
-export const FACE_LANDMARKER_MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+// MediaPipe FaceLandmarker runtime — vendored in-repo, so the app makes no
+// external network requests at all: everything is served from this origin
+// and runs on-device in the browser.
+export const MEDIAPIPE_WASM_BASE = "./vendor/mediapipe/wasm";
+export const FACE_LANDMARKER_MODEL_URL = "./vendor/mediapipe/face_landmarker.task";
 
 // MediaPipe's face transformation matrix assumes a vertical FOV of 63 degrees.
 export const CAMERA_VERTICAL_FOV_DEG = 63;

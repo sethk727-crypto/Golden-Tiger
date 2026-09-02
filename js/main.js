@@ -132,6 +132,9 @@ async function start() {
     els.sliderScale.value = Math.round(MASK_SCALE_DEFAULT * 100);
     sceneRenderer.setStudioLook(true);
 
+    // Automation/debug hook (harmless in production, no UI surface).
+    window.__aurumask = { sceneRenderer, tiger, persona, tracker, recorder };
+
     els.startOverlay.hidden = true;
     els.controls.hidden = false;
     state.running = true;
