@@ -1,0 +1,270 @@
+/* AuruMask — minimal dark UI */
+
+:root {
+  --bg: #0b0b0d;
+  --panel: rgba(18, 18, 22, 0.72);
+  --line: rgba(255, 255, 255, 0.12);
+  --text: #f2f0ea;
+  --dim: #9b978c;
+  --gold: #e8b545;
+  --red: #ff3b30;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro", Inter, system-ui, sans-serif;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+#stage { position: fixed; inset: 0; }
+
+/* Mirrored live preview (recordings stay unmirrored, like the iPhone camera). */
+#render-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  background: #000;
+}
+
+#camera-video { display: none; }
+
+/* ---- Start overlay ---- */
+#start-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(80% 60% at 50% 35%, #1a1508 0%, var(--bg) 70%);
+  z-index: 30;
+}
+.start-card { text-align: center; padding: 24px; max-width: 320px; }
+.start-emblem { font-size: 64px; filter: drop-shadow(0 6px 24px rgba(232, 181, 69, 0.45)); }
+.start-card h1 {
+  margin: 12px 0 8px;
+  font-size: 34px;
+  letter-spacing: 0.04em;
+  background: linear-gradient(180deg, #ffe9ad, var(--gold) 60%, #a97a14);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.start-card p { color: var(--dim); line-height: 1.45; margin: 0 0 20px; }
+#start-button {
+  font-size: 17px;
+  font-weight: 600;
+  color: #1c1503;
+  background: linear-gradient(180deg, #ffd873, var(--gold));
+  border: none;
+  border-radius: 14px;
+  padding: 14px 36px;
+  cursor: pointer;
+}
+#start-button:active { transform: scale(0.97); }
+.fineprint { font-size: 12px; margin-top: 16px !important; }
+
+/* ---- Debug overlay ---- */
+#debug-overlay {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  left: 10px;
+  z-index: 20;
+  pointer-events: none;
+}
+#debug-text {
+  font: 11px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+  color: #c9f76f;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 8px 10px;
+  border-radius: 8px;
+  white-space: pre;
+}
+
+/* ---- Controls ---- */
+#controls { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+#controls > * { pointer-events: auto; }
+
+#side-panel {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chip {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 19px;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.chip[data-active="true"] { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold) inset; }
+#btn-export { font-size: 14px; letter-spacing: 0.02em; }
+
+#sliders {
+  position: absolute;
+  left: 14px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 118px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(46vw, 210px);
+}
+#sliders label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 7px 12px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+#sliders span { font-size: 11px; color: var(--dim); width: 46px; }
+#sliders input[type="range"] { flex: 1; accent-color: var(--gold); }
+
+#bottom-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 22px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+#rec-time {
+  font: 600 13px ui-monospace, monospace;
+  color: #fff;
+  background: var(--red);
+  border-radius: 999px;
+  padding: 3px 12px;
+}
+#btn-record {
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  border: 4px solid rgba(255, 255, 255, 0.9);
+  background: transparent;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+#btn-record span {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: var(--red);
+  transition: border-radius 0.2s, width 0.2s, height 0.2s;
+}
+#btn-record.recording span { width: 30px; height: 30px; border-radius: 8px; }
+
+/* ---- Sheets ---- */
+#save-sheet, #export-sheet {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: end center;
+  background: rgba(0, 0, 0, 0.5);
+}
+.sheet-card {
+  width: 100%;
+  max-width: 430px;
+  background: #131318;
+  border: 1px solid var(--line);
+  border-radius: 22px 22px 0 0;
+  padding: 22px 20px calc(env(safe-area-inset-bottom, 0px) + 22px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sheet-card h2 { margin: 0 0 2px; font-size: 20px; }
+.sheet-card p { margin: 0 0 8px; color: var(--dim); font-size: 13px; line-height: 1.45; }
+.sheet-card button {
+  font-size: 16px;
+  font-weight: 600;
+  padding: 13px;
+  border-radius: 13px;
+  border: 1px solid var(--line);
+  background: #1e1e26;
+  color: var(--text);
+  cursor: pointer;
+}
+.sheet-card button.primary {
+  background: linear-gradient(180deg, #ffd873, var(--gold));
+  color: #1c1503;
+  border: none;
+}
+.sheet-card button.ghost { background: transparent; color: var(--dim); border: none; }
+.sheet-card button:disabled { opacity: 0.4; }
+.row { display: flex; gap: 8px; }
+.row select {
+  flex: 1;
+  font-size: 14px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #1e1e26;
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+.file-label {
+  display: block;
+  border: 1px dashed var(--line);
+  border-radius: 13px;
+  padding: 13px;
+  text-align: center;
+  color: var(--dim);
+  font-size: 14px;
+  cursor: pointer;
+}
+.file-label input { display: none; }
+
+#export-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: #1e1e26;
+  overflow: hidden;
+}
+#export-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--gold);
+  transition: width 0.2s;
+}
+
+/* ---- Toast ---- */
+#toast {
+  position: absolute;
+  left: 50%;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  transform: translateX(-50%);
+  z-index: 50;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 13px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  max-width: 84vw;
+  text-align: center;
+}

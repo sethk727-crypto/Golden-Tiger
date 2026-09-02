@@ -1,0 +1,46 @@
+// AuruMask configuration.
+// MODEL_PATH is the single swap point for the final tiger asset (see ASSET_CONTRACT.md).
+// Set it to a .glb path (e.g. "/assets/tiger.glb"). When null, the procedural
+// placeholder tiger is built in code and wired to the same blendshape contract.
+export const MODEL_PATH = null;
+
+// Path to the persona mapping file, tweakable without touching code.
+export const MAPPING_PATH = "./mapping.json";
+
+// MediaPipe FaceLandmarker runtime (CDN — the only network fetches the app makes;
+// everything after model load runs on-device in the browser).
+export const MEDIAPIPE_WASM_BASE =
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+export const FACE_LANDMARKER_MODEL_URL =
+  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+
+// MediaPipe's face transformation matrix assumes a vertical FOV of 63 degrees.
+export const CAMERA_VERTICAL_FOV_DEG = 63;
+
+// Requested capture constraints. The browser gives us the closest it supports;
+// the debug overlay shows what we actually got.
+export const VIDEO_CONSTRAINTS = {
+  facingMode: "user",
+  width: { ideal: 1920 },
+  height: { ideal: 1080 },
+  frameRate: { ideal: 60 },
+};
+
+// Recording bitrates (bits/second).
+export const RECORD_VIDEO_BITRATE = 20_000_000;
+export const EXPORT_VIDEO_BITRATE = 60_000_000;
+export const RECORD_AUDIO_BITRATE = 128_000;
+
+// Mask scale slider range (1.0 = anatomical fit).
+export const MASK_SCALE_MIN = 1.0;
+export const MASK_SCALE_MAX = 1.3;
+export const MASK_SCALE_DEFAULT = 1.12;
+
+// Smoothing slider default (0..1). Low by default: responsiveness beats smoothness.
+export const SMOOTHING_DEFAULT = 0.2;
+
+// Chroma green used by the clean-plate toggle.
+export const GREEN_SCREEN_COLOR = 0x00b140;
+
+// Sidecar format version (see js/sidecar.js).
+export const SIDECAR_VERSION = 1;

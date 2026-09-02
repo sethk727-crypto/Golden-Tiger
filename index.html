@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#0b0b0d" />
+  <title>AuruMask</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='0.9em' font-size='90'%3E%F0%9F%90%AF%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./styles.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <main id="stage">
+    <canvas id="render-canvas"></canvas>
+    <video id="camera-video" playsinline muted></video>
+
+    <!-- Start gate: iOS requires a user gesture before camera access. -->
+    <div id="start-overlay">
+      <div class="start-card">
+        <div class="start-emblem">🐯</div>
+        <h1>AuruMask</h1>
+        <p>Golden tiger, live on your face.<br />Everything runs on this device.</p>
+        <button id="start-button">Start camera</button>
+        <p class="fineprint">Needs camera (and mic when recording).<br />Best on iPhone in Safari.</p>
+      </div>
+    </div>
+
+    <!-- Debug overlay: DOM only — never part of recordings. -->
+    <div id="debug-overlay" hidden>
+      <div id="debug-text"></div>
+    </div>
+
+    <!-- Controls -->
+    <div id="controls" hidden>
+      <div id="side-panel">
+        <button class="chip" id="btn-mask" data-active="true" title="Mask on/off">🐯</button>
+        <button class="chip" id="btn-studio" data-active="true" title="Studio light">💡</button>
+        <button class="chip" id="btn-green" title="Green screen">🟩</button>
+        <button class="chip" id="btn-debug" title="Debug overlay">📊</button>
+        <button class="chip" id="btn-export" title="4K export">4K</button>
+      </div>
+
+      <div id="sliders">
+        <label>
+          <span>Smooth</span>
+          <input type="range" id="slider-smooth" min="0" max="100" value="20" />
+        </label>
+        <label>
+          <span>Size</span>
+          <input type="range" id="slider-scale" min="100" max="130" value="112" />
+        </label>
+      </div>
+
+      <div id="bottom-bar">
+        <div id="rec-time" hidden>0:00</div>
+        <button id="btn-record" aria-label="Record"><span></span></button>
+      </div>
+    </div>
+
+    <!-- Post-take sheet -->
+    <div id="save-sheet" hidden>
+      <div class="sheet-card">
+        <h2>Take finished</h2>
+        <p id="save-summary"></p>
+        <button id="btn-save-video" class="primary">Save video</button>
+        <button id="btn-save-sidecar">Save tracking data (.json)</button>
+        <button id="btn-dismiss-save" class="ghost">Done</button>
+      </div>
+    </div>
+
+    <!-- Export screen -->
+    <div id="export-sheet" hidden>
+      <div class="sheet-card">
+        <h2>4K re-render</h2>
+        <p class="explain">
+          Live capture records at the camera's native resolution. This replays a
+          take's tracking data through the same renderer at up to 3840×2160 —
+          the true-4K path. Rendering runs in real time (a 30s take ≈ 30s).
+        </p>
+        <label class="file-label">
+          <input type="file" id="export-file" accept="application/json" />
+          <span id="export-file-name">Choose tracking .json…</span>
+        </label>
+        <div class="row">
+          <select id="export-res">
+            <option value="3840x2160" selected>3840 × 2160 (4K)</option>
+            <option value="2560x1440">2560 × 1440</option>
+            <option value="1920x1080">1920 × 1080</option>
+          </select>
+          <select id="export-bg">
+            <option value="green" selected>Green screen</option>
+            <option value="black">Black</option>
+          </select>
+        </div>
+        <div id="export-progress" hidden><div id="export-progress-fill"></div></div>
+        <button id="btn-run-export" class="primary" disabled>Render</button>
+        <button id="btn-close-export" class="ghost">Close</button>
+      </div>
+    </div>
+
+    <div id="toast" hidden></div>
+  </main>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
