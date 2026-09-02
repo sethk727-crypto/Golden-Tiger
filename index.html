@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#0b0b0d" />
-  <title>AuruMask</title>
+  <title>AuruMask — Theatrical Mask Engine</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='0.9em' font-size='90'%3E%F0%9F%90%AF%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="./styles.css" />
   <script type="importmap">
@@ -21,46 +21,68 @@
     <canvas id="render-canvas"></canvas>
     <video id="camera-video" playsinline muted></video>
 
-    <!-- Start gate: iOS requires a user gesture before camera access. -->
-    <div id="start-overlay">
-      <div class="start-card">
-        <div class="start-emblem">🐯</div>
-        <h1>AuruMask</h1>
-        <p>Golden tiger, live on your face.<br />Everything runs on this device.</p>
-        <button id="start-button">Start camera</button>
-        <p class="fineprint">Needs camera (and mic when recording).<br />Best on iPhone in Safari.</p>
+    <!-- Straight-line entry: the whole screen is the button. One tap pays the
+         browser's mandatory camera-permission gesture; everything else
+         (tracker WASM, model, tiger, renderer) preloads while this shows. -->
+    <button id="start-overlay" aria-label="Enter AuruMask">
+      <div class="start-inner">
+        <div class="wordmark">AURUMASK</div>
+        <div class="tagline">THEATRICAL&nbsp;MASK&nbsp;ENGINE</div>
+        <div class="enter-ring"><span id="start-hint">TAP&nbsp;TO&nbsp;ENTER</span></div>
+        <div class="fineprint">CAMERA · ON-DEVICE · NO ACCOUNTS · NO CLOUD</div>
+      </div>
+    </button>
+
+    <!-- Product bumper: alignment ring. Visible while searching for a face,
+         fades on lock, pulses back on tracking loss. Never in recordings. -->
+    <div id="align-ring" hidden>
+      <svg viewBox="0 0 200 280" aria-hidden="true">
+        <ellipse cx="100" cy="140" rx="78" ry="112" />
+      </svg>
+      <div class="align-hint">CENTER YOUR FACE</div>
+    </div>
+
+    <!-- Telemetry HUD ("cockpit gauges"): monospace, DOM-only — excluded
+         from recordings by construction. Off by default; toggled in drawer. -->
+    <div id="hud" hidden>
+      <div class="hud-line" id="hud-format"></div>
+      <div class="hud-line" id="hud-rates"></div>
+      <div class="hud-gauges">
+        <div class="gauge"><span class="g-label">JAW</span><div class="g-bar"><div id="g-jaw"></div></div><span class="g-val" id="v-jaw">0.00</span></div>
+        <div class="gauge"><span class="g-label">BROW</span><div class="g-bar"><div id="g-brow"></div></div><span class="g-val" id="v-brow">0.00</span></div>
+        <div class="gauge"><span class="g-label">BLK·L</span><div class="g-bar"><div id="g-blinkl"></div></div><span class="g-val" id="v-blinkl">0.00</span></div>
+        <div class="gauge"><span class="g-label">BLK·R</span><div class="g-bar"><div id="g-blinkr"></div></div><span class="g-val" id="v-blinkr">0.00</span></div>
+        <div class="gauge roar"><span class="g-label">ROAR</span><div class="g-bar"><div id="g-roar"></div></div><span class="g-val" id="v-roar">0.00</span></div>
       </div>
     </div>
 
-    <!-- Debug overlay: DOM only — never part of recordings. -->
-    <div id="debug-overlay" hidden>
-      <div id="debug-text"></div>
-    </div>
-
-    <!-- Controls -->
+    <!-- Primary surface: record button + drawer handle. Nothing else. -->
     <div id="controls" hidden>
-      <div id="side-panel">
-        <button class="chip" id="btn-mask" data-active="true" title="Mask on/off">🐯</button>
-        <button class="chip" id="btn-studio" data-active="true" title="Studio light">💡</button>
-        <button class="chip" id="btn-green" title="Green screen">🟩</button>
-        <button class="chip" id="btn-debug" title="Debug overlay">📊</button>
-        <button class="chip" id="btn-export" title="4K export">4K</button>
-      </div>
+      <div id="rec-time" hidden>0:00</div>
+      <button id="btn-record" aria-label="Record"><span></span></button>
 
-      <div id="sliders">
-        <label>
-          <span>Smooth</span>
-          <input type="range" id="slider-smooth" min="0" max="100" value="20" />
-        </label>
-        <label>
-          <span>Size</span>
-          <input type="range" id="slider-scale" min="100" max="130" value="112" />
-        </label>
-      </div>
-
-      <div id="bottom-bar">
-        <div id="rec-time" hidden>0:00</div>
-        <button id="btn-record" aria-label="Record"><span></span></button>
+      <!-- Progressive disclosure: everything secondary lives in the drawer. -->
+      <div id="drawer">
+        <button id="drawer-handle" aria-label="Open controls"><span></span></button>
+        <div id="drawer-body">
+          <div class="drawer-row toggles">
+            <button class="tgl" id="btn-mask" data-active="true">MASK</button>
+            <button class="tgl" id="btn-studio" data-active="true">STUDIO</button>
+            <button class="tgl" id="btn-green">PLATE</button>
+            <button class="tgl" id="btn-hud">HUD</button>
+          </div>
+          <label class="drawer-row slider">
+            <span>SMOOTH</span>
+            <input type="range" id="slider-smooth" min="0" max="100" value="20" />
+            <span class="s-val" id="val-smooth">20</span>
+          </label>
+          <label class="drawer-row slider">
+            <span>SCALE</span>
+            <input type="range" id="slider-scale" min="100" max="130" value="112" />
+            <span class="s-val" id="val-scale">112</span>
+          </label>
+          <button class="drawer-row action" id="btn-export">4K&nbsp;MASTER&nbsp;RENDER</button>
+        </div>
       </div>
     </div>
 
@@ -78,7 +100,7 @@
     <!-- Export screen -->
     <div id="export-sheet" hidden>
       <div class="sheet-card">
-        <h2>4K re-render</h2>
+        <h2>4K master render</h2>
         <p class="explain">
           Live capture records at the camera's native resolution. This replays a
           take's tracking data through the same renderer at up to 3840×2160 —

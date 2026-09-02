@@ -1,4 +1,13 @@
 // AuruMask entry point: owns the camera, the render loop, and the UI wiring.
+//
+// UX architecture (docs/UX_ARCHITECTURE.md):
+// - Straight-line onboarding: every heavy asset (tracker WASM + model, tiger,
+//   renderer, mapping) preloads while the entry screen shows. The single tap
+//   pays only the browser-mandated camera-permission gesture.
+// - Bumper: the alignment ring shows while no face is locked, fades on lock,
+//   pulses back on tracking loss (with vibration where the platform has it).
+// - Progressive disclosure: the viewport carries the record button and a
+//   drawer handle; everything secondary lives in the drawer.
 
 import * as THREE from "three";
 import {
@@ -21,17 +30,30 @@ const els = {
   canvas: $("render-canvas"),
   video: $("camera-video"),
   startOverlay: $("start-overlay"),
-  startButton: $("start-button"),
+  startHint: $("start-hint"),
   controls: $("controls"),
-  debugOverlay: $("debug-overlay"),
-  debugText: $("debug-text"),
+  alignRing: $("align-ring"),
+  hud: $("hud"),
+  hudFormat: $("hud-format"),
+  hudRates: $("hud-rates"),
+  gauges: {
+    jaw: [$("g-jaw"), $("v-jaw")],
+    brow: [$("g-brow"), $("v-brow")],
+    blinkl: [$("g-blinkl"), $("v-blinkl")],
+    blinkr: [$("g-blinkr"), $("v-blinkr")],
+    roar: [$("g-roar"), $("v-roar")],
+  },
+  drawer: $("drawer"),
+  drawerHandle: $("drawer-handle"),
   btnMask: $("btn-mask"),
   btnStudio: $("btn-studio"),
   btnGreen: $("btn-green"),
-  btnDebug: $("btn-debug"),
+  btnHud: $("btn-hud"),
   btnExport: $("btn-export"),
   sliderSmooth: $("slider-smooth"),
   sliderScale: $("slider-scale"),
+  valSmooth: $("val-smooth"),
+  valScale: $("val-scale"),
   btnRecord: $("btn-record"),
   recTime: $("rec-time"),
   saveSheet: $("save-sheet"),
@@ -56,14 +78,19 @@ const state = {
   maskOn: true,
   studio: true,
   green: false,
-  debug: false,
+  hud: false,
   lastFrameTime: 0,
   renderFps: 0,
   fpsWindow: [],
-  droppedBudget: 0,
+  frameCounter: 0,
   lastTake: null,
   sidecarText: null,
   captureFps: 30,
+  lastPose: null,
+  // Ring state machine.
+  ringVisible: true,
+  lastLockAt: -Infinity,
+  everLocked: false,
 };
 
 let tracker, persona, tiger, sceneRenderer, recorder, exporter, mapping;
@@ -73,6 +100,11 @@ function toast(msg, ms = 3200) {
   els.toast.hidden = false;
   clearTimeout(toast._t);
   toast._t = setTimeout(() => (els.toast.hidden = true), ms);
+}
+
+function vibrate(pattern) {
+  // Android Chrome only; iOS Safari has no vibration API (see UX doc).
+  try { navigator.vibrate?.(pattern); } catch { /* ignore */ }
 }
 
 async function loadMapping() {
@@ -86,12 +118,35 @@ async function loadMapping() {
   }
 }
 
+// ---- Preload: starts at page load, before the entry tap ----
+// Only getUserMedia needs a user gesture; everything else warms up now so the
+// tap-to-tiger path is as short as the platform allows.
+const preload = (async () => {
+  mapping = await loadMapping();
+  sceneRenderer = new SceneRenderer(els.canvas);
+  tracker = new FaceTracker();
+  const [tigerHead] = await Promise.all([
+    loadTigerModel(MODEL_PATH, mapping),
+    tracker.init(),
+  ]);
+  tiger = tigerHead;
+  sceneRenderer.setTiger(tiger);
+  persona = new PersonaMapping(mapping);
+  recorder = new TakeRecorder(els.canvas);
+  exporter = new Exporter(sceneRenderer, tiger, mapping);
+  console.info("[AuruMask] Preload complete (tracker + tiger + renderer).");
+})();
+preload.catch((err) => {
+  console.error("[AuruMask] Preload failed:", err);
+  toast(`Load failed: ${err.message}`, 8000);
+});
+
 async function start() {
-  els.startButton.disabled = true;
-  els.startButton.textContent = "Loading…";
+  els.startOverlay.disabled = true;
+  els.startHint.textContent = "STARTING…";
 
   try {
-    // 1) Camera first — the permission prompt needs the user gesture fresh.
+    // The gesture-fresh call: camera permission.
     const stream = await navigator.mediaDevices.getUserMedia({
       video: VIDEO_CONSTRAINTS,
       audio: false,
@@ -103,33 +158,22 @@ async function start() {
       els.video.onloadedmetadata = r;
     });
 
-    const track = stream.getVideoTracks()[0];
-    const settings = track.getSettings();
+    const settings = stream.getVideoTracks()[0].getSettings();
     state.captureFps = settings.frameRate || 30;
     console.info(
       `[AuruMask] Capture format: ${settings.width}x${settings.height}@${settings.frameRate}fps`
     );
 
-    // 2) Heavy pieces in parallel: tracker model, persona mapping, tiger.
-    els.startButton.textContent = "Loading tracker…";
-    mapping = await loadMapping();
-    tracker = new FaceTracker();
-    const trackerInit = tracker.init();
-    sceneRenderer = new SceneRenderer(els.canvas);
-    tiger = await loadTigerModel(MODEL_PATH, mapping);
-    sceneRenderer.setTiger(tiger);
+    await preload; // usually already resolved by the time the user taps
     sceneRenderer.attachVideo(els.video);
-    await trackerInit;
 
-    persona = new PersonaMapping(mapping);
-    recorder = new TakeRecorder(els.canvas);
-    exporter = new Exporter(sceneRenderer, tiger, mapping);
-
-    // 3) Apply defaults.
+    // Defaults.
     setSmoothing(SMOOTHING_DEFAULT);
     els.sliderSmooth.value = Math.round(SMOOTHING_DEFAULT * 100);
+    els.valSmooth.textContent = els.sliderSmooth.value;
     sceneRenderer.setMaskScale(MASK_SCALE_DEFAULT);
     els.sliderScale.value = Math.round(MASK_SCALE_DEFAULT * 100);
+    els.valScale.textContent = els.sliderScale.value;
     sceneRenderer.setStudioLook(true);
 
     // Automation/debug hook (harmless in production, no UI surface).
@@ -137,15 +181,15 @@ async function start() {
 
     els.startOverlay.hidden = true;
     els.controls.hidden = false;
+    els.alignRing.hidden = false; // bumper on until first lock
     state.running = true;
     state.lastFrameTime = performance.now();
     loopToken++;
     requestAnimationFrame((t) => loop(t, loopToken));
-    toast("Face the camera — the tiger follows you");
   } catch (err) {
     console.error(err);
-    els.startButton.disabled = false;
-    els.startButton.textContent = "Start camera";
+    els.startOverlay.disabled = false;
+    els.startHint.textContent = "TAP TO ENTER";
     toast(
       err.name === "NotAllowedError"
         ? "Camera permission denied. Enable it in Settings → Safari → Camera."
@@ -166,8 +210,8 @@ function loop(now, token = loopToken) {
   if (!state.running || token !== loopToken) return;
   const dt = Math.min(0.1, (now - state.lastFrameTime) / 1000);
   state.lastFrameTime = now;
+  state.frameCounter++;
 
-  // Render-FPS window (for the debug overlay and drop detection).
   state.fpsWindow.push(now);
   while (state.fpsWindow.length && now - state.fpsWindow[0] > 1000) {
     state.fpsWindow.shift();
@@ -179,33 +223,75 @@ function loop(now, token = loopToken) {
   if (signal?.tracked && signal.matrix) {
     const angVel = sceneRenderer.updateFaceTransform(signal.matrix, dt);
     const pose = persona.update(signal);
+    state.lastPose = pose;
     tiger.applyPose(pose, angVel, dt);
     if (recorder.isRecording) {
       recorder.captureFrame(now / 1000, signal.shapes, signal.matrix);
     }
   }
 
+  updateAlignRing(!!signal?.tracked, now);
   sceneRenderer.updateAdaptiveLighting();
   sceneRenderer.render();
 
-  if (state.debug) updateDebugOverlay(signal);
+  if (state.hud && state.frameCounter % 3 === 0) updateHud(signal);
   if (recorder.isRecording) updateRecTime();
 
   requestAnimationFrame((t) => loop(t, token));
 }
 
-function updateDebugOverlay(signal) {
+// ---- Alignment ring state machine ----
+// Locked → ring fades out. Unlocked > 600ms → ring returns with a pulse.
+function updateAlignRing(tracked, now) {
+  if (tracked) {
+    state.lastLockAt = now;
+    if (state.ringVisible) {
+      state.ringVisible = false;
+      els.alignRing.classList.add("fading");
+      setTimeout(() => {
+        if (!state.ringVisible) els.alignRing.hidden = true;
+      }, 380);
+      if (!state.everLocked) {
+        state.everLocked = true;
+        vibrate(12); // "the mask is on" — where the platform supports it
+      }
+    }
+  } else if (
+    !state.ringVisible &&
+    state.everLocked &&
+    now - state.lastLockAt > 600
+  ) {
+    state.ringVisible = true;
+    els.alignRing.hidden = false;
+    // Force a reflow so the fade-in transition restarts cleanly.
+    void els.alignRing.offsetWidth;
+    els.alignRing.classList.remove("fading");
+    vibrate([10, 60, 10]);
+  }
+}
+
+// ---- Telemetry HUD ----
+function updateHud(signal) {
   const v = els.video;
-  const jaw = signal?.shapes?.jawOpen ?? 0;
-  const roarBar = "#".repeat(Math.round(jaw * 20)).padEnd(20, "·");
-  els.debugText.textContent =
-    `capture  ${v.videoWidth}x${v.videoHeight}@${Math.round(state.captureFps)}\n` +
-    `render   ${state.renderFps} fps\n` +
-    `tracking ${tracker.trackingFps} fps  face:${signal?.tracked ? "LOCK" : "----"}\n` +
-    `jawOpen  ${jaw.toFixed(3)} [${roarBar}]\n` +
-    `smooth   ${(Number(els.sliderSmooth.value) / 100).toFixed(2)}  ` +
-    `scale ${(Number(els.sliderScale.value) / 100).toFixed(2)}\n` +
-    `mime     ${recorder?.mimeType ?? "n/a"}`;
+  const s = signal?.shapes ?? {};
+  els.hudFormat.textContent =
+    `CAM ${v.videoWidth}x${v.videoHeight}·${Math.round(state.captureFps)}  ` +
+    `${recorder?.mimeType?.split(";")[0] ?? "n/a"}`;
+  els.hudRates.textContent =
+    `RDR ${String(state.renderFps).padStart(2)}fps  ` +
+    `TRK ${String(tracker.trackingFps).padStart(2)}Hz  ` +
+    `${signal?.tracked ? "LOCK" : "····"}`;
+  setGauge("jaw", s.jawOpen ?? 0);
+  setGauge("brow", ((s.browDownLeft ?? 0) + (s.browDownRight ?? 0)) / 2);
+  setGauge("blinkl", s.eyeBlinkLeft ?? 0);
+  setGauge("blinkr", s.eyeBlinkRight ?? 0);
+  setGauge("roar", state.lastPose?.roar ?? 0);
+}
+
+function setGauge(name, value) {
+  const [bar, label] = els.gauges[name];
+  bar.style.width = `${Math.round(Math.min(1, Math.max(0, value)) * 100)}%`;
+  label.textContent = value.toFixed(2);
 }
 
 function updateRecTime() {
@@ -228,6 +314,8 @@ async function toggleRecord() {
       );
       els.btnRecord.classList.add("recording");
       els.recTime.hidden = false;
+      setDrawer(false); // clean viewport while rolling
+      vibrate(8);
     } catch (err) {
       toast(`Recording failed: ${err.message}`, 5000);
     }
@@ -235,6 +323,7 @@ async function toggleRecord() {
     const take = await recorder.stop();
     els.btnRecord.classList.remove("recording");
     els.recTime.hidden = true;
+    vibrate(8);
     if (take) {
       state.lastTake = take;
       els.saveSummary.textContent =
@@ -245,9 +334,30 @@ async function toggleRecord() {
   }
 }
 
+// ---- Drawer ----
+function setDrawer(open) {
+  els.drawer.classList.toggle("open", open);
+}
+
+els.drawerHandle.addEventListener("click", () => {
+  setDrawer(!els.drawer.classList.contains("open"));
+});
+// Swipe on the drawer: up opens, down closes.
+let touchStartY = null;
+els.drawer.addEventListener("touchstart", (e) => {
+  touchStartY = e.touches[0].clientY;
+}, { passive: true });
+els.drawer.addEventListener("touchend", (e) => {
+  if (touchStartY === null) return;
+  const dy = e.changedTouches[0].clientY - touchStartY;
+  if (dy < -24) setDrawer(true);
+  else if (dy > 24) setDrawer(false);
+  touchStartY = null;
+}, { passive: true });
+
 // ---- UI wiring ----
 
-els.startButton.addEventListener("click", start);
+els.startOverlay.addEventListener("click", start);
 els.btnRecord.addEventListener("click", toggleRecord);
 
 els.btnMask.addEventListener("click", () => {
@@ -265,16 +375,18 @@ els.btnGreen.addEventListener("click", () => {
   sceneRenderer.setGreenScreen(state.green);
   els.btnGreen.dataset.active = state.green;
 });
-els.btnDebug.addEventListener("click", () => {
-  state.debug = !state.debug;
-  els.debugOverlay.hidden = !state.debug;
-  els.btnDebug.dataset.active = state.debug;
+els.btnHud.addEventListener("click", () => {
+  state.hud = !state.hud;
+  els.hud.hidden = !state.hud;
+  els.btnHud.dataset.active = state.hud;
 });
 
 els.sliderSmooth.addEventListener("input", () => {
+  els.valSmooth.textContent = els.sliderSmooth.value;
   setSmoothing(Number(els.sliderSmooth.value) / 100);
 });
 els.sliderScale.addEventListener("input", () => {
+  els.valScale.textContent = els.sliderScale.value;
   sceneRenderer.setMaskScale(Number(els.sliderScale.value) / 100);
 });
 
@@ -293,7 +405,10 @@ els.btnSaveSidecar.addEventListener("click", async () => {
 els.btnDismissSave.addEventListener("click", () => (els.saveSheet.hidden = true));
 
 // Export sheet.
-els.btnExport.addEventListener("click", () => (els.exportSheet.hidden = false));
+els.btnExport.addEventListener("click", () => {
+  setDrawer(false);
+  els.exportSheet.hidden = false;
+});
 els.btnCloseExport.addEventListener("click", () => {
   exporter?.abort();
   els.exportSheet.hidden = true;

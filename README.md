@@ -38,7 +38,7 @@ You need: this repository on GitHub (it already is), and a free
 ### Run it on your iPhone
 
 1. Open that URL **in Safari** on your iPhone (camera access works best there).
-2. Tap **Start camera** and allow camera access when asked.
+2. Tap anywhere on the entry screen and allow camera access when asked.
 3. Face the camera. The tiger head should lock onto your face within a second.
 4. Optional: tap the **Share** button in Safari → **Add to Home Screen** to get
    an app-style icon that opens full screen.
@@ -57,16 +57,25 @@ the same machine; to test on a phone use the Vercel URL.
 
 ## Using the app
 
+The viewport stays clean: just the render, the record button, and a drawer
+handle at the bottom edge. Tap **anywhere** on the entry screen to start —
+that single tap is the entire onboarding (the UX rationale, journey timings,
+and wireframes live in [`docs/UX_ARCHITECTURE.md`](docs/UX_ARCHITECTURE.md)).
+A dashed gold **alignment ring** guides you while no face is locked, fades
+away on lock, and pulses back if tracking drops.
+
+Everything secondary is in the **drawer** (tap the handle or swipe up):
+
 | Control | What it does |
 |---|---|
-| **Red button** | Start/stop recording (video + your mic audio). |
-| 🐯 | Mask on/off. |
-| 💡 | Studio light: consistent gold-flattering lighting. Off = the mask picks up your room's light color. |
-| 🟩 | Green screen: renders the tiger over solid chroma green instead of your camera (for OBS/Resolve keying). |
-| 📊 | Debug overlay: capture format, render/tracking FPS, live `jawOpen` meter. Never appears in recordings. |
-| **4K** | The offline re-render screen (see below). |
-| **Smooth** | Tracking smoothing 0–100 % (one-euro filter). Default is low — responsiveness beats smoothness. |
-| **Size** | Mask scale 100–130 % so the tiger fully covers your real head and hair. |
+| **Red button** | Start/stop recording (video + your mic audio). Opening a recording closes the drawer. |
+| **MASK** | Tiger on/off. |
+| **STUDIO** | Studio light: consistent gold-flattering lighting. Off = the mask picks up your room's light color. |
+| **PLATE** | Clean plate: renders the tiger over solid chroma green instead of your camera (for OBS/Resolve keying). |
+| **HUD** | Telemetry: capture format, codec, render fps, tracking Hz, and live gauges (JAW, BROW, blinks, ROAR). Never appears in recordings. |
+| **SMOOTH** | Tracking smoothing 0–100 % (one-euro filter). Default is low — responsiveness beats smoothness. |
+| **SCALE** | Mask scale 100–130 % so the tiger fully covers your real head and hair. |
+| **4K MASTER RENDER** | The offline re-render screen (see below). |
 
 **After a take** you get two files:
 
@@ -76,7 +85,7 @@ the same machine; to test on a phone use the Vercel URL.
   blendshape coefficients, and the head transform. Keep it if you want a 4K
   version later.
 
-**4K re-render**: tap **4K**, pick a saved tracking `.json`, choose resolution
+**4K re-render**: drawer → **4K MASTER RENDER**, pick a saved tracking `.json`, choose resolution
 and background, tap **Render**. The take replays through the same renderer at
 up to 3840×2160 and saves a high-bitrate file. The UI says this plainly and
 it bears repeating here: **live capture records at the camera's native
@@ -129,11 +138,11 @@ Stated plainly rather than silently degraded:
   True occlusion arrives with the native ARKit app.
 - **No HEVC `.mov` guarantee.** Browsers record via `MediaRecorder`: Safari
   produces `.mp4` (H.264/HEVC), Chrome produces `.webm`. The recorder picks
-  the best container the device offers and the debug overlay shows which.
+  the best container the device offers and the HUD shows which.
 - **No ProRes.** The 4K export uses the browser's best encoder at 60 Mbps.
   ProRes belongs to the native `AVAssetWriter` pipeline.
 - **Frame rate follows the camera.** Most phone browsers deliver 30 fps from
-  `getUserMedia`; the debug overlay shows the real capture/render/tracking
+  `getUserMedia`; the HUD shows the real capture/render/tracking
   rates rather than promising 60.
 
 ## Repository layout

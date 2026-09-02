@@ -6,12 +6,14 @@ and the filters; everything below is what only a human with a face can check.
 
 ## Startup
 
-- [ ] Page loads over HTTPS; tap **Start camera** → permission prompt appears.
+- [ ] Page loads over HTTPS; tap anywhere on the entry screen → permission prompt appears.
 - [ ] Deny once → clear error toast with recovery hint; re-allow via
       Settings → Safari → Camera, reload, works.
 - [ ] Tiger appears locked to your face within ~1 s of facing the camera.
-- [ ] 📊 debug overlay shows capture resolution/fps, render fps, tracking fps,
-      and a live `jawOpen` meter. Note the numbers for your device.
+- [ ] Alignment ring shows until the first face lock, then fades out; look
+      away / cover the camera > ½ s → ring pulses back, re-center → fades.
+- [ ] Drawer → **HUD** shows capture resolution/fps, codec, render fps,
+      tracking Hz, and live gauges (JAW/BROW/blinks/ROAR). Note the numbers.
 
 ## Tracking & persona
 
@@ -35,8 +37,8 @@ Expression checks:
 - [ ] Shake your head quickly "no" → whiskers ring/oscillate briefly;
       ears wobble and settle (ears settle faster than whiskers).
 - [ ] Turn head ±45°, tilt, nod — mask stays glued, no swimming.
-- [ ] Walk to a window / change lighting with 💡 off → gold picks up the room
-      tint. 💡 on → consistent studio gold regardless of room.
+- [ ] Walk to a window / change lighting with STUDIO off → gold picks up the
+      room tint. STUDIO on → consistent studio gold regardless of room.
 
 ## Controls
 
@@ -44,18 +46,20 @@ Expression checks:
       floaty. Default 20 % → good compromise.
 - [ ] Size slider 100→130 % → tiger grows around the head; at your fit point
       your hair/ears disappear behind it.
-- [ ] 🐯 toggles the mask; 🟩 swaps camera for flat green (mask + green only —
-      **no camera pixels**); 📊 overlay never shows in recordings.
+- [ ] MASK toggles the tiger; PLATE swaps camera for flat green (mask + green
+      only — **no camera pixels**); the HUD never shows in recordings.
+- [ ] Drawer opens by handle tap and swipe-up, closes by swipe-down, and
+      auto-closes when recording starts.
 
 ## Recording
 
 - [ ] Record 10 s while talking → stop → **Save video** → share sheet →
       Save Video → appears in Photos, plays with audio in sync.
-- [ ] Recording contains camera + tiger, **no UI, no debug overlay**, and is
+- [ ] Recording contains camera + tiger, **no UI, no HUD, no ring**, and is
       unmirrored (text behind you reads correctly).
-- [ ] Record with 🟩 on → green background clip; key it in any editor.
+- [ ] Record with PLATE on → green background clip; key it in any editor.
 - [ ] **Save tracking data (.json)** → file lands in Files/Downloads.
-- [ ] During a 60 s recording, render fps (📊) stays at the pre-recording
+- [ ] During a 60 s recording, render fps (HUD) stays at the pre-recording
       value; phone warm is OK, throttling collapse is a fail.
 
 ## 4K export
