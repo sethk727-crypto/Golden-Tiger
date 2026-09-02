@@ -4,6 +4,15 @@
 // placeholder tiger is built in code and wired to the same blendshape contract.
 export const MODEL_PATH = null;
 
+// Adjustments applied to DOWNLOADED models (the auto-fit path — static .glb
+// files without the contract rig). Tweak these if a model loads facing the
+// wrong way, too big/small, or off-center. Ignored for contract assets.
+export const MODEL_ADJUST = {
+  rotateYDeg: 0, // 180 if the model faces away from you, ±90 if sideways
+  scale: 1.0, // multiplier on the auto-fitted size
+  offset: [0, 0, 0], // cm nudge [x right, y up, z toward camera]
+};
+
 // Path to the persona mapping file, tweakable without touching code.
 export const MAPPING_PATH = "./mapping.json";
 

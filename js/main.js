@@ -121,12 +121,16 @@ async function loadMapping() {
 // ---- Preload: starts at page load, before the entry tap ----
 // Only getUserMedia needs a user gesture; everything else warms up now so the
 // tap-to-tiger path is as short as the platform allows.
+// `?model=<url or path>` previews a candidate .glb without touching config —
+// e.g. https://your-app.vercel.app/?model=/assets/tiger.glb
+const modelOverride = new URLSearchParams(location.search).get("model");
+
 const preload = (async () => {
   mapping = await loadMapping();
   sceneRenderer = new SceneRenderer(els.canvas);
   tracker = new FaceTracker();
   const [tigerHead] = await Promise.all([
-    loadTigerModel(MODEL_PATH, mapping),
+    loadTigerModel(modelOverride || MODEL_PATH, mapping),
     tracker.init(),
   ]);
   tiger = tigerHead;

@@ -121,6 +121,10 @@ Front camera ──► MediaPipe FaceLandmarker (on-device, WASM/GPU)
   roar threshold/hold, ear behavior, and the two spring constants
   (`stiffness`, `damping`) for ears and whiskers — metal whiskers are stiff
   and lightly damped so they ring; edit the JSON and redeploy, no code.
+- **Getting a photoreal tiger**: see [`GET_A_TIGER.md`](GET_A_TIGER.md) —
+  generate one from your reference image (Meshy/Tripo), download one free
+  (Sketchfab), or commission the full rig. Static downloads are auto-fitted
+  and **auto-jaw-rigged in code**, so mouth sync works with no 3D software.
 - **The tiger**: until the final asset lands, a procedural gold tiger
   (stripes, fangs, emissive amber eyes, ruff, wire whiskers) is built in code
   against the same contract. Swap in the real model by placing a `.glb` in the

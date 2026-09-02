@@ -16,6 +16,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { Spring } from "./spring.js";
+import { MODEL_ADJUST } from "./config.js";
 
 /* ------------------------------ textures ------------------------------ */
 
@@ -649,9 +650,118 @@ export function buildProceduralTiger(mapping) {
   return new TigerHead(root, bindings, mapping);
 }
 
+/* ------------------- universal GLB adapter (downloads) ----------------- */
+
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
+const smoothstep = (a, b, x) => {
+  const t = clamp01((x - a) / (b - a));
+  return t * t * (3 - 2 * t);
+};
+
 /**
- * Loads the real tiger asset (.glb) from MODEL_PATH and binds by contract
- * names. Falls back to the procedural placeholder on any failure.
+ * Scales and centers an arbitrary downloaded model to head size (units: cm,
+ * ~24cm wide) with its center at the face origin. Handles the common case
+ * of models authored in meters or at arbitrary scales.
+ */
+function autoFit(root) {
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const scale = maxDim > 0 ? 26 / maxDim : 1;
+  root.position.sub(center); // center at origin first
+  const fit = new THREE.Group();
+  fit.name = "AutoFit";
+  fit.add(root);
+  fit.rotation.y = THREE.MathUtils.degToRad(MODEL_ADJUST.rotateYDeg || 0);
+  fit.scale.setScalar(scale * (MODEL_ADJUST.scale || 1));
+  const [ox, oy, oz] = MODEL_ADJUST.offset || [0, 0, 0];
+  fit.position.set(ox, 0.5 + oy, -1.0 + oz); // nudge like the procedural head
+  console.info(
+    `[AuruMask] Auto-fit: model ${size.x.toFixed(1)}x${size.y.toFixed(1)}x${size.z.toFixed(1)} → scale ${scale.toFixed(3)}`
+  );
+  return fit;
+}
+
+/**
+ * Automatic jaw rig for STATIC downloads (no morphs, no named bones — e.g.
+ * a Sketchfab free model or an AI image-to-3D generation). Converts each
+ * mesh to a two-bone SkinnedMesh: a root bone and a generated jaw bone at
+ * an estimated hinge, with weights blending over the lower-front region.
+ * Result: jawOpen drives the mouth on any model, no Blender required.
+ * (Blinks/ears still need the authored asset per ASSET_CONTRACT.md.)
+ */
+function autoJawRig(root, bindings) {
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  // Hinge: mouth-corner height, at the rear third of the head depth.
+  const hingeY = box.min.y + size.y * 0.42;
+  const hingeZ = box.min.z + size.z * 0.3;
+  const frontZ = box.min.z + size.z * 0.45;
+
+  const rootBone = new THREE.Bone();
+  rootBone.name = "autoRoot";
+  const jawBone = new THREE.Bone();
+  jawBone.name = "autoJaw";
+  jawBone.position.set(0, hingeY, hingeZ);
+  rootBone.add(jawBone);
+  root.add(rootBone);
+  // The skeleton snapshots bone inverses from current world matrices, so the
+  // whole tree must be up to date first, and every bindMatrix below must be
+  // captured in this same state (rig BEFORE any auto-fit wrapping).
+  root.updateMatrixWorld(true);
+  const skeleton = new THREE.Skeleton([rootBone, jawBone]);
+
+  const replaced = [];
+  const world = new THREE.Vector3();
+  root.traverse((mesh) => {
+    if (!mesh.isMesh) return;
+    const geo = mesh.geometry;
+    const count = geo.attributes.position.count;
+    const skinIndex = new Uint16Array(count * 4);
+    const skinWeight = new Float32Array(count * 4);
+    for (let i = 0; i < count; i++) {
+      world.fromBufferAttribute(geo.attributes.position, i);
+      mesh.localToWorld(world);
+      // Below the mouth line AND toward the front → jaw; smooth falloff.
+      const wy = smoothstep(hingeY + size.y * 0.06, hingeY - size.y * 0.1, world.y);
+      const wz = smoothstep(frontZ - size.z * 0.12, frontZ + size.z * 0.1, world.z);
+      const w = wy * wz;
+      skinIndex[i * 4] = 1; // jaw
+      skinWeight[i * 4] = w;
+      skinIndex[i * 4 + 1] = 0; // root
+      skinWeight[i * 4 + 1] = 1 - w;
+    }
+    geo.setAttribute("skinIndex", new THREE.BufferAttribute(skinIndex, 4));
+    geo.setAttribute("skinWeight", new THREE.BufferAttribute(skinWeight, 4));
+    const skinned = new THREE.SkinnedMesh(geo, mesh.material);
+    skinned.position.copy(mesh.position);
+    skinned.quaternion.copy(mesh.quaternion);
+    skinned.scale.copy(mesh.scale);
+    skinned.bind(skeleton, mesh.matrixWorld.clone());
+    replaced.push([mesh, skinned]);
+  });
+  for (const [mesh, skinned] of replaced) {
+    mesh.parent.add(skinned);
+    mesh.parent.remove(mesh);
+  }
+
+  bindings.jaw = jawBone;
+  bindings.jawRestX = 0;
+  console.info(
+    `[AuruMask] Auto-jaw rig: ${replaced.length} mesh(es) skinned, hinge y=${hingeY.toFixed(1)} z=${hingeZ.toFixed(1)}. ` +
+      "Jaw sync active; blinks/ears need the authored asset (ASSET_CONTRACT.md)."
+  );
+}
+
+/**
+ * Loads the tiger asset (.glb) from MODEL_PATH and binds by contract names.
+ * A static model with no morphs and no named bones (a plain download or an
+ * AI image-to-3D generation) is auto-fitted to head size and auto-jaw-rigged
+ * so mouth sync works out of the box. Falls back to the procedural
+ * placeholder on any failure.
  */
 export async function loadTigerModel(modelPath, mapping) {
   if (!modelPath) return buildProceduralTiger(mapping);
@@ -678,11 +788,23 @@ export async function loadTigerModel(modelPath, mapping) {
         if (o.name === "whiskers_R") bindings.whiskersR = o;
       }
     });
+
+    const isContractAsset =
+      bindings.morphMeshes.length > 0 || bindings.jaw !== undefined;
+    let mounted = root;
+    if (!isContractAsset) {
+      autoJawRig(root, bindings); // rig in raw model space first
+      mounted = autoFit(root);    // then scale/center as ancestor motion
+    }
+
     const wrapper = new THREE.Group();
-    wrapper.add(root);
+    wrapper.add(mounted);
     wrapper.name = "TigerHeadRoot";
     console.info(
-      `[AuruMask] Loaded model ${modelPath}: ${bindings.morphMeshes.length} morph mesh(es).`
+      `[AuruMask] Loaded model ${modelPath}: ` +
+        (isContractAsset
+          ? `${bindings.morphMeshes.length} morph mesh(es), contract rig.`
+          : "static model → auto-fit + auto-jaw rig.")
     );
     return new TigerHead(wrapper, bindings, mapping);
   } catch (err) {
