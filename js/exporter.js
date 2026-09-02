@@ -37,13 +37,14 @@ export class Exporter {
 
     const sr = this.sr;
     const prev = {
-      width: sr.canvas.width,
-      height: sr.canvas.height,
+      width: sr.baseWidth,
+      height: sr.baseHeight,
       green: sr.greenScreen,
     };
 
-    // Reconfigure the live stage for the offline pass.
-    sr.resize(opts.width, opts.height);
+    // Reconfigure the live stage for the offline pass (exact pixels, no
+    // supersampling on top of the chosen export resolution).
+    sr.resizeExact(opts.width, opts.height);
     sr.bgMaterial.map = null;
     sr.bgMaterial.color.set(opts.background === "black" ? 0x000000 : 0x00b140);
     sr.bgMaterial.needsUpdate = true;

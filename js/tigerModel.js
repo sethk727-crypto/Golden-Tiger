@@ -1,65 +1,23 @@
 // Tiger head model. Two paths behind one interface:
 //  1. loadTigerModel(): loads the real asset from MODEL_PATH (.glb) and binds
 //     its morph targets + bones by the names in ASSET_CONTRACT.md.
-//  2. buildProceduralTiger(): the in-code placeholder — a stylized golden
-//     tiger head honoring the same blendshape contract, so the real asset
-//     is a drop-in swap.
+//  2. buildProceduralTiger(): the in-code placeholder — a gold tiger head
+//     modeled on the reference statue (broad striped forehead, cheek ruff,
+//     cupped ears, dark-rimmed amber eyes, whisker pads, long canines),
+//     honoring the same blendshape contract so the real asset is a drop-in.
 //
 // The returned TigerHead exposes:
 //   group                 THREE.Group to attach to the face anchor
 //   applyPose(pose, headAngularVel, dt)   drives morphs/bones/springs
 //   setEnvironmentIntensity(v)
 //
-// Units are centimeters (MediaPipe's metric camera space).
+// Units are centimeters (MediaPipe's metric camera space). Front is +Z.
 
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { Spring } from "./spring.js";
 
-const GOLD = 0xd4a017;
-const GOLD_BRIGHT = 0xffcf5e;
-const DARK_STRIPE = "#3a2408";
-
-/** Procedural gold-with-stripes texture painted on a canvas. */
-function makeStripeTexture() {
-  const size = 512;
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext("2d");
-
-  const grad = ctx.createLinearGradient(0, 0, 0, size);
-  grad.addColorStop(0, "#ffd98a");
-  grad.addColorStop(0.5, "#e8b545");
-  grad.addColorStop(1, "#c98f1e");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, size, size);
-
-  // Tapered tiger stripes, mirrored around the center seam.
-  ctx.fillStyle = DARK_STRIPE;
-  const rand = mulberry32(0x71ac);
-  for (let i = 0; i < 14; i++) {
-    const y = 40 + i * 34 + rand() * 12;
-    const len = 90 + rand() * 110;
-    const w = 8 + rand() * 10;
-    for (const side of [0, 1]) {
-      ctx.save();
-      ctx.translate(side === 0 ? 0 : size, y);
-      ctx.scale(side === 0 ? 1 : -1, 1);
-      ctx.rotate((rand() - 0.5) * 0.35);
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.quadraticCurveTo(len * 0.6, -w, len, 0);
-      ctx.quadraticCurveTo(len * 0.6, w, 0, w * 0.4);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-    }
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  return tex;
-}
+/* ------------------------------ textures ------------------------------ */
 
 function mulberry32(seed) {
   let a = seed;
@@ -72,17 +30,228 @@ function mulberry32(seed) {
   };
 }
 
-function goldMaterial(texture) {
-  return new THREE.MeshPhysicalMaterial({
-    color: 0xffffff,
-    map: texture ?? null,
-    metalness: 1.0,
-    roughness: 0.24,
-    clearcoat: 0.6,
-    clearcoatRoughness: 0.2,
-    envMapIntensity: 1.2,
-  });
+// Equirect fur map for the skull/muzzle spheres. Sphere UV puts the face
+// front (+Z) at u=0.25, so the pattern is authored around canvas x = w/4:
+// radiating forehead stripes above, cheek chevrons at the sides, whisker
+// dot rows low on the front, generic stripes around the back.
+function makeFurTexture() {
+  const w = 1024, h = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  const rand = mulberry32(0x9137);
+  const FRONT = w * 0.25;
+
+  // Base gold with vertical tonal variation.
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, "#f4c964");
+  grad.addColorStop(0.35, "#e2ac3c");
+  grad.addColorStop(0.7, "#cf9526");
+  grad.addColorStop(1, "#b57d1a");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  // Fine fur strokes: thousands of short vertical flicks, light and dark.
+  for (let i = 0; i < 5200; i++) {
+    const x = rand() * w;
+    const y = rand() * h;
+    const len = 5 + rand() * 13;
+    const dark = rand() > 0.48;
+    ctx.strokeStyle = dark
+      ? `rgba(74, 46, 8, ${0.05 + rand() * 0.08})`
+      : `rgba(255, 232, 160, ${0.05 + rand() * 0.08})`;
+    ctx.lineWidth = 0.8 + rand() * 1.1;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + (rand() - 0.5) * 4, y + len);
+    ctx.stroke();
+  }
+
+  const stripe = (x, y, len, wdt, ang) => {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(ang);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(wdt, len * 0.55, 0, len);
+    ctx.quadraticCurveTo(-wdt, len * 0.55, 0, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  };
+
+  ctx.fillStyle = "#31210a";
+
+  // Forehead: dense thin stripes radiating down from the crown, mirrored.
+  for (let i = 0; i < 9; i++) {
+    const off = (i + 0.5) * 13 + rand() * 4;
+    const len = 66 - i * 4 + rand() * 16;
+    const wdt = 4.5 + rand() * 2.5;
+    const ang = (i + 1) * 0.05;
+    stripe(FRONT - off, h * 0.06, len, wdt, -ang);
+    stripe(FRONT + off, h * 0.06, len, wdt, ang);
+  }
+  // Center crown stripe.
+  stripe(FRONT, h * 0.04, 84, 5.5, 0);
+
+  // Cheek chevrons: angled stripes sweeping back from the eyes.
+  for (let i = 0; i < 5; i++) {
+    const off = w * (0.09 + i * 0.032);
+    const y = h * (0.34 + i * 0.05) + rand() * 8;
+    const len = 74 + rand() * 26;
+    const wdt = 6 + rand() * 3;
+    stripe(FRONT - off, y, len, wdt, -1.05 - i * 0.06);
+    stripe(FRONT + off, y, len, wdt, 1.05 + i * 0.06);
+  }
+
+  // Back and sides of the head: classic vertical stripes.
+  for (let i = 0; i < 13; i++) {
+    const x = w * 0.52 + i * (w * 0.036) + rand() * 8;
+    const y = h * 0.12 + rand() * h * 0.28;
+    stripe(x % w, y, 90 + rand() * 60, 7 + rand() * 4, (rand() - 0.5) * 0.3);
+  }
+
+  // Whisker-pad dot rows, low on the face front.
+  ctx.fillStyle = "rgba(42, 28, 8, 0.7)";
+  for (const side of [-1, 1]) {
+    for (let r = 0; r < 2; r++) {
+      for (let i = 0; i < 4; i++) {
+        const x = FRONT + side * (w * 0.03 + i * w * 0.02) + (rand() - 0.5) * 6;
+        const y = h * (0.61 + r * 0.045) + (rand() - 0.5) * 8;
+        ctx.beginPath();
+        ctx.arc(x, y, 1.6 + rand() * 0.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 8;
+  return tex;
 }
+
+// Radial amber iris for a flat disc in front of the eyeball.
+function makeIrisTexture() {
+  const s = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = s;
+  const ctx = canvas.getContext("2d");
+  const g = ctx.createRadialGradient(s / 2, s / 2, 6, s / 2, s / 2, s / 2);
+  g.addColorStop(0, "#ffd98f");
+  g.addColorStop(0.35, "#f5a52a");
+  g.addColorStop(0.72, "#b4650a");
+  g.addColorStop(0.9, "#5e3305");
+  g.addColorStop(1, "#20130a");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, s, s);
+  // Radial fibers.
+  const rand = mulberry32(0x51ce);
+  ctx.strokeStyle = "rgba(60, 30, 4, 0.25)";
+  for (let i = 0; i < 90; i++) {
+    const a = rand() * Math.PI * 2;
+    ctx.lineWidth = 0.8 + rand();
+    ctx.beginPath();
+    ctx.moveTo(s / 2 + Math.cos(a) * 14, s / 2 + Math.sin(a) * 14);
+    ctx.lineTo(s / 2 + Math.cos(a) * (s * 0.46), s / 2 + Math.sin(a) * (s * 0.46));
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/* ------------------------------ geometry ------------------------------ */
+
+// Displaces vertices along their normals with layered sine "clump" noise —
+// turns clean spheres into fur-like sculpted masses (as on the statue).
+function furDisplace(geometry, amount, freq = 1) {
+  const pos = geometry.attributes.position;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    const x = v.x * freq, y = v.y * freq, z = v.z * freq;
+    const n =
+      (Math.sin(x * 1.7 + z * 2.3) +
+        Math.sin(y * 2.9 + x * 3.1 + 1.7) +
+        Math.sin(z * 4.3 + y * 1.9 + 4.2)) / 3;
+    const fine = Math.sin(x * 9.1 + y * 7.7 + z * 8.3) * 0.35;
+    const d = 1 + (n + fine) * amount;
+    pos.setXYZ(i, v.x * d, v.y * d, v.z * d);
+  }
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/* ------------------------------ materials ----------------------------- */
+
+function makeMaterials() {
+  const furTex = makeFurTexture();
+  return {
+    fur: new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      map: furTex,
+      bumpMap: furTex,
+      bumpScale: 0.6,
+      metalness: 1.0,
+      roughness: 0.34,
+      clearcoat: 0.35,
+      clearcoatRoughness: 0.35,
+      envMapIntensity: 1.25,
+    }),
+    smoothGold: new THREE.MeshPhysicalMaterial({
+      color: 0xf3c968,
+      metalness: 1.0,
+      roughness: 0.14,
+      clearcoat: 0.7,
+      clearcoatRoughness: 0.12,
+      envMapIntensity: 1.4,
+    }),
+    enamel: new THREE.MeshPhysicalMaterial({
+      color: 0xfff0c8,
+      metalness: 0.85,
+      roughness: 0.1,
+      clearcoat: 0.9,
+      clearcoatRoughness: 0.08,
+      envMapIntensity: 1.5,
+    }),
+    darkGold: new THREE.MeshPhysicalMaterial({
+      color: 0x4a2f0a,
+      metalness: 1.0,
+      roughness: 0.5,
+      envMapIntensity: 0.8,
+    }),
+    rim: new THREE.MeshPhysicalMaterial({
+      color: 0x241503,
+      metalness: 1.0,
+      roughness: 0.42,
+      envMapIntensity: 0.7,
+    }),
+    innerMouth: new THREE.MeshPhysicalMaterial({
+      color: 0x571f0c,
+      metalness: 0.6,
+      roughness: 0.55,
+      clearcoat: 0.5,
+      envMapIntensity: 0.7,
+    }),
+    tongue: new THREE.MeshPhysicalMaterial({
+      color: 0x9a5a1e,
+      metalness: 0.85,
+      roughness: 0.38,
+      clearcoat: 0.6,
+      envMapIntensity: 1.0,
+    }),
+    whisker: new THREE.MeshPhysicalMaterial({
+      color: 0xfff3c4,
+      metalness: 1,
+      roughness: 0.12,
+      envMapIntensity: 1.4,
+    }),
+  };
+}
+
+/* ------------------------------ TigerHead ----------------------------- */
 
 export class TigerHead {
   constructor(group, bindings, mapping) {
@@ -103,12 +272,13 @@ export class TigerHead {
    */
   applyPose(pose, headAngVel, dt) {
     const b = this.b;
+    const s = pose.shapes;
 
     // 1) Morph targets by contract name (real asset path).
     if (b.morphMeshes) {
       for (const mesh of b.morphMeshes) {
         const dict = mesh.morphTargetDictionary;
-        for (const [name, value] of Object.entries(pose.shapes)) {
+        for (const [name, value] of Object.entries(s)) {
           const idx = dict[name];
           if (idx !== undefined) mesh.morphTargetInfluences[idx] = value;
         }
@@ -118,6 +288,9 @@ export class TigerHead {
     // 2) Jaw bone: base + additive roar range (computed by PersonaMapping).
     if (b.jaw) {
       b.jaw.rotation.x = b.jawRestX + pose.jawRadians;
+      // Smile widens the jaw a touch; keeps talking lively.
+      const smile = (s.mouthSmileLeft + s.mouthSmileRight) / 2;
+      b.jaw.scale.x = 1 + smile * 0.06;
     }
 
     // 3) Ears: persona target (flatten beats perk) + spring wobble from head
@@ -141,32 +314,49 @@ export class TigerHead {
 
     // 5) Placeholder-only expression rig (real asset does this via morphs).
     if (b.eyelidL) {
-      const blinkL = pose.shapes.eyeBlinkLeft;
-      const blinkR = pose.shapes.eyeBlinkRight;
+      const blinkL = s.eyeBlinkLeft;
+      const blinkR = s.eyeBlinkRight;
       b.eyelidL.scale.y = 0.12 + blinkL * 1.0;
       b.eyelidR.scale.y = 0.12 + blinkR * 1.0;
       b.eyelidL.visible = blinkL > 0.05;
       b.eyelidR.visible = blinkR > 0.05;
     }
     if (b.browL) {
-      const browUp =
-        (pose.shapes.browOuterUpLeft + pose.shapes.browInnerUp) * 0.5;
-      const browDn = pose.shapes.browDownLeft;
-      b.browL.position.y = b.browRestY + (browUp - browDn) * 0.9;
-      const browUpR =
-        (pose.shapes.browOuterUpRight + pose.shapes.browInnerUp) * 0.5;
-      b.browR.position.y = b.browRestY + (browUpR - pose.shapes.browDownRight) * 0.9;
+      const browUpL = (s.browOuterUpLeft + s.browInnerUp) * 0.5;
+      const browUpR = (s.browOuterUpRight + s.browInnerUp) * 0.5;
+      b.browL.position.y = b.browRestY + (browUpL - s.browDownLeft) * 0.9;
+      b.browR.position.y = b.browRestY + (browUpR - s.browDownRight) * 0.9;
     }
     if (b.noseTip) {
-      const sneer = (pose.shapes.noseSneerLeft + pose.shapes.noseSneerRight) / 2;
-      b.noseTip.position.y = b.noseRestY + sneer * 0.4 + pose.roar * 0.3;
+      const sneer =
+        (s.noseSneerLeft + s.noseSneerRight) / 2 + s.mouthShrugUpper * 0.5;
+      b.noseTip.position.y = b.noseRestY + sneer * 0.45 + pose.roar * 0.35;
     }
-    if (b.eyes) {
-      // Roar: eyes flare brighter, pupils narrow to slits.
-      const flare = 0.55 + pose.roar * 1.6;
-      for (const eye of b.eyes) eye.material.emissiveIntensity = flare;
+
+    // Gaze: eyeballs follow the eyeLook coefficients.
+    if (b.eyeGroupL) {
+      const pitch =
+        ((s.eyeLookDownLeft + s.eyeLookDownRight) -
+          (s.eyeLookUpLeft + s.eyeLookUpRight)) * 0.5 * 0.30;
+      b.eyeGroupL.rotation.x = pitch;
+      b.eyeGroupR.rotation.x = pitch;
+      b.eyeGroupL.rotation.y = (s.eyeLookInLeft - s.eyeLookOutLeft) * 0.35;
+      b.eyeGroupR.rotation.y = (s.eyeLookOutRight - s.eyeLookInRight) * 0.35;
+    }
+
+    // Lip shapes: pucker/funnel purse the muzzle forward and narrow.
+    if (b.muzzleGroup) {
+      const purse = Math.max(s.mouthPucker, s.mouthFunnel);
+      b.muzzleGroup.scale.x = 1 - purse * 0.1;
+      b.muzzleGroup.position.z = b.muzzleRestZ + purse * 0.55;
+    }
+
+    // Roar: eyes flare, pupils narrow to slits.
+    if (b.eyeMats) {
+      const flare = 0.35 + pose.roar * 1.5;
+      for (const m of b.eyeMats) m.emissiveIntensity = flare;
       if (b.pupils) {
-        for (const p of b.pupils) p.scale.x = 0.55 - pose.roar * 0.3;
+        for (const p of b.pupils) p.scale.x = p.userData.baseX * (1 - pose.roar * 0.45);
       }
     }
   }
@@ -180,204 +370,269 @@ export class TigerHead {
   }
 }
 
-/** Builds the stylized placeholder tiger. Everything in cm, +Z toward camera. */
+/* ------------------------- procedural build --------------------------- */
+
 export function buildProceduralTiger(mapping) {
   const group = new THREE.Group();
   group.name = "TigerHead(placeholder)";
-  const tex = makeStripeTexture();
-  const gold = goldMaterial(tex);
-  const goldPlain = goldMaterial(null);
-  goldPlain.color.set(GOLD_BRIGHT);
-  const darkGold = new THREE.MeshPhysicalMaterial({
-    color: 0x6b4a12,
-    metalness: 1,
-    roughness: 0.45,
-  });
-  const innerMouth = new THREE.MeshStandardMaterial({
-    color: 0x2a0d06,
-    metalness: 0.2,
-    roughness: 0.9,
-  });
-
+  const M = makeMaterials();
   const bindings = {};
 
-  // Cranium — wider than tall, flattened front.
-  const cranium = new THREE.Mesh(new THREE.SphereGeometry(9.2, 48, 32), gold);
-  cranium.scale.set(1.18, 1.0, 0.95);
-  group.add(cranium);
-
-  // Cheek ruff — flattened cones fanning out around the lower head.
-  const ruff = new THREE.Group();
-  const ruffGeo = new THREE.ConeGeometry(2.2, 7, 6);
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2;
-    if (Math.abs(Math.sin(a)) < 0.25 && Math.cos(a) > 0) continue; // gap at muzzle
-    const spike = new THREE.Mesh(ruffGeo, gold);
-    spike.position.set(Math.cos(a) * 9.5, Math.sin(a) * 8.2 - 1.5, -2.0);
-    spike.rotation.z = a - Math.PI / 2;
-    spike.scale.z = 0.45;
-    ruff.add(spike);
+  /* Skull: wide, flat-fronted, fur-displaced. */
+  const skullGeo = new THREE.SphereGeometry(9.4, 96, 64);
+  {
+    const pos = skullGeo.attributes.position;
+    const v = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      let { x, y, z } = v;
+      x *= 1.24;                          // broad cheeks
+      if (z > 0) z *= 0.86;               // flat face
+      y *= 0.92;                          // wider-than-tall head
+      if (y > 0) y *= 0.94;               // flatter crown
+      if (y < -3 && z > 2) z *= 0.82;     // clear room for muzzle/jaw
+      pos.setXYZ(i, x, y, z);
+    }
+    skullGeo.computeVertexNormals();
   }
-  group.add(ruff);
+  furDisplace(skullGeo, 0.016, 0.9);
+  const skull = new THREE.Mesh(skullGeo, M.fur);
+  group.add(skull);
 
-  // Muzzle.
-  const muzzle = new THREE.Mesh(new THREE.SphereGeometry(4.6, 32, 24), gold);
-  muzzle.position.set(0, -2.6, 6.4);
-  muzzle.scale.set(1.25, 0.85, 1.0);
-  group.add(muzzle);
+  /* Cheek ruff: two rings of tapered fur spikes framing the face. */
+  const rand = mulberry32(0x77aa);
+  for (const [radius, baseLen, z] of [[9.6, 5.2, -1.8], [10.4, 4.0, -0.6]]) {
+    for (let i = 0; i < 40; i++) {
+      const a = (i / 40) * Math.PI * 2 + rand() * 0.08;
+      if (Math.sin(a) > 0.72) continue; // crown stays clear for the ears
+      const bottom = Math.sin(a) < -0.6; // shorter under the chin
+      const len = (bottom ? baseLen * 0.5 : baseLen) * (0.75 + rand() * 0.4);
+      const spike = new THREE.Mesh(
+        new THREE.ConeGeometry(2.0 + rand() * 0.8, len, 7),
+        M.fur
+      );
+      spike.position.set(
+        Math.cos(a) * radius * 1.18,
+        Math.sin(a) * radius * 0.88 - 1.2,
+        z + rand() * 0.8
+      );
+      spike.rotation.z = a - Math.PI / 2 + (rand() - 0.5) * 0.25;
+      spike.rotation.x = -0.12;
+      spike.scale.z = 0.35;
+      group.add(spike);
+    }
+  }
 
-  // Nose.
-  const nose = new THREE.Mesh(new THREE.SphereGeometry(1.5, 24, 16), goldPlain);
-  nose.position.set(0, -0.9, 10.4);
-  nose.scale.set(1.25, 0.8, 0.7);
-  group.add(nose);
+  /* Muzzle group (moves for pucker/funnel). */
+  const muzzleGroup = new THREE.Group();
+  const muzzleGeo = furDisplace(new THREE.SphereGeometry(4.9, 64, 48), 0.012, 1.1);
+  const muzzle = new THREE.Mesh(muzzleGeo, M.fur);
+  muzzle.position.set(0, -2.5, 7.0);
+  muzzle.scale.set(1.3, 0.82, 1.0);
+  muzzleGroup.add(muzzle);
+  // Whisker pads.
+  for (const side of [-1, 1]) {
+    const pad = new THREE.Mesh(
+      furDisplace(new THREE.SphereGeometry(2.5, 40, 28), 0.015, 1.4),
+      M.fur
+    );
+    pad.position.set(side * 2.1, -2.1, 9.0);
+    pad.scale.set(1.12, 0.78, 0.85);
+    muzzleGroup.add(pad);
+  }
+  // Nose bridge (striped).
+  const bridge = new THREE.Mesh(new THREE.SphereGeometry(2.2, 32, 24), M.fur);
+  bridge.position.set(0, 0.9, 8.5);
+  bridge.scale.set(1.05, 1.7, 0.75);
+  muzzleGroup.add(bridge);
+  // Nose: rounded triangle, glossy.
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(1.5, 28, 20), M.smoothGold);
+  nose.position.set(0, -0.8, 10.8);
+  nose.scale.set(1.35, 0.85, 0.6);
+  muzzleGroup.add(nose);
   bindings.noseTip = nose;
   bindings.noseRestY = nose.position.y;
+  group.add(muzzleGroup);
+  bindings.muzzleGroup = muzzleGroup;
+  bindings.muzzleRestZ = 0;
 
-  // Inner mouth cavity.
-  const cavity = new THREE.Mesh(new THREE.SphereGeometry(3.6, 24, 16), innerMouth);
-  cavity.position.set(0, -4.2, 5.2);
+  /* Mouth interior + upper teeth. */
+  const cavity = new THREE.Mesh(new THREE.SphereGeometry(3.7, 28, 20), M.innerMouth);
+  cavity.position.set(0, -4.0, 5.0);
+  cavity.scale.set(1.1, 0.9, 1.1);
   group.add(cavity);
-
-  // Upper fangs.
-  const fangGeo = new THREE.ConeGeometry(0.55, 3.2, 12);
-  for (const x of [-2.4, 2.4]) {
-    const fang = new THREE.Mesh(fangGeo, goldPlain);
-    fang.position.set(x, -4.6, 8.2);
-    fang.rotation.x = Math.PI; // point down
-    group.add(fang);
+  for (const side of [-1, 1]) {
+    const canine = new THREE.Mesh(new THREE.ConeGeometry(0.68, 5.2, 14), M.enamel);
+    canine.position.set(side * 2.6, -5.3, 8.2);
+    canine.rotation.set(-0.1, 0, Math.PI + side * 0.1);
+    group.add(canine);
   }
-  // Upper small teeth row.
-  for (let i = -2; i <= 2; i++) {
+  for (let i = -3; i <= 3; i++) {
     if (i === 0) continue;
-    const t = new THREE.Mesh(new THREE.ConeGeometry(0.32, 1.1, 8), goldPlain);
-    t.position.set(i * 0.9, -4.4, 8.8);
+    const t = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1.3, 10), M.enamel);
+    t.position.set(i * 0.72, -4.7, 9.2 - Math.abs(i) * 0.25);
     t.rotation.x = Math.PI;
     group.add(t);
   }
 
-  // Jaw group — pivot at the jaw hinge (back of the skull, below ears).
+  /* Jaw group — pivot at the hinge. */
   const jawGroup = new THREE.Group();
-  jawGroup.position.set(0, -3.4, -0.5);
-  const lowerJaw = new THREE.Mesh(new THREE.SphereGeometry(3.9, 32, 24), gold);
-  lowerJaw.position.set(0, -1.8, 6.6);
-  lowerJaw.scale.set(1.1, 0.55, 1.05);
+  jawGroup.position.set(0, -3.1, -0.8);
+  const lowerJawGeo = furDisplace(new THREE.SphereGeometry(4.1, 48, 36), 0.012, 1.2);
+  const lowerJaw = new THREE.Mesh(lowerJawGeo, M.fur);
+  lowerJaw.position.set(0, -1.7, 6.9);
+  lowerJaw.scale.set(1.12, 0.58, 1.1);
   jawGroup.add(lowerJaw);
-  const chinTuft = new THREE.Mesh(new THREE.ConeGeometry(1.4, 3.4, 8), gold);
-  chinTuft.position.set(0, -3.2, 6.8);
-  chinTuft.rotation.x = Math.PI * 0.95;
-  jawGroup.add(chinTuft);
-  // Lower fangs + teeth ride the jaw.
-  for (const x of [-2.0, 2.0]) {
-    const fang = new THREE.Mesh(new THREE.ConeGeometry(0.45, 2.4, 12), goldPlain);
-    fang.position.set(x, -0.6, 8.0);
-    jawGroup.add(fang);
-  }
+  // Chin tuft.
   for (let i = -2; i <= 2; i++) {
-    const t = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.9, 8), goldPlain);
-    t.position.set(i * 0.8, -0.8, 8.4);
+    const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.9, 2.6 + Math.abs(i) * -0.3, 6), M.fur);
+    tuft.position.set(i * 1.1, -3.3, 6.9 - Math.abs(i) * 0.4);
+    tuft.rotation.x = Math.PI * 0.93;
+    tuft.scale.z = 0.5;
+    jawGroup.add(tuft);
+  }
+  for (const side of [-1, 1]) {
+    const canine = new THREE.Mesh(new THREE.ConeGeometry(0.55, 3.6, 12), M.enamel);
+    canine.position.set(side * 2.05, 0.7, 8.3);
+    canine.rotation.z = side * -0.08;
+    jawGroup.add(canine);
+  }
+  for (let i = -3; i <= 3; i++) {
+    if (i === 0) continue;
+    const t = new THREE.Mesh(new THREE.ConeGeometry(0.26, 1.05, 8), M.enamel);
+    t.position.set(i * 0.66, 0.35, 8.8 - Math.abs(i) * 0.22);
     jawGroup.add(t);
   }
-  const tongue = new THREE.Mesh(new THREE.SphereGeometry(1.8, 20, 14), innerMouth);
-  tongue.position.set(0, -1.1, 6.2);
-  tongue.scale.set(0.9, 0.35, 1.4);
+  const tongue = new THREE.Mesh(new THREE.SphereGeometry(1.95, 28, 20), M.tongue);
+  tongue.position.set(0, -0.8, 5.9);
+  tongue.scale.set(0.95, 0.4, 1.5);
   jawGroup.add(tongue);
   group.add(jawGroup);
   bindings.jaw = jawGroup;
-  bindings.jawRestX = 0.06;
+  bindings.jawRestX = 0.05;
   jawGroup.rotation.x = bindings.jawRestX;
 
-  // Eyes — amber, emissive, with slit pupils and gold lids for blinks.
-  bindings.eyes = [];
+  /* Eyes: dark rims, ivory ball, amber iris disc, slit pupil, gold lids. */
+  bindings.eyeMats = [];
   bindings.pupils = [];
-  const eyeMatBase = new THREE.MeshPhysicalMaterial({
-    color: 0xffb52e,
-    emissive: 0xff8c00,
-    emissiveIntensity: 0.55,
-    metalness: 0.1,
-    roughness: 0.15,
-  });
+  const irisTex = makeIrisTexture();
   for (const side of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(1.7, 24, 16), eyeMatBase.clone());
-    eye.position.set(side * 4.0, 1.6, 6.8);
-    group.add(eye);
-    bindings.eyes.push(eye);
+    const socket = new THREE.Group();
+    socket.position.set(side * 3.7, 2.1, 7.1);
+    // Dark rim (eye liner as on the statue).
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(1.8, 0.28, 12, 32), M.rim);
+    rim.scale.set(1.08, 0.88, 0.5);
+    rim.position.z = 0.65;
+    socket.add(rim);
 
-    const pupil = new THREE.Mesh(
-      new THREE.SphereGeometry(0.75, 16, 12),
-      new THREE.MeshBasicMaterial({ color: 0x120a02 })
+    const eyeGroup = new THREE.Group();
+    const eyeMat = new THREE.MeshPhysicalMaterial({
+      color: 0xf7ecd2,
+      metalness: 0.35,
+      roughness: 0.12,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.05,
+      emissive: 0xff9418,
+      emissiveIntensity: 0.12,
+      envMapIntensity: 1.2,
+    });
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(1.5, 40, 28), eyeMat);
+    eyeGroup.add(ball);
+    const iris = new THREE.Mesh(
+      new THREE.CircleGeometry(1.3, 32),
+      new THREE.MeshPhysicalMaterial({
+        map: irisTex,
+        metalness: 0.25,
+        roughness: 0.2,
+        clearcoat: 1.0,
+        emissive: 0xdd7708,
+        emissiveMap: irisTex,
+        emissiveIntensity: 0.35,
+      })
     );
-    // Proud of the eye surface so the slit reads from the front.
-    pupil.position.set(side * 4.0, 1.6, 8.55);
-    pupil.scale.set(0.55, 1.0, 0.35);
-    group.add(pupil);
-    bindings.pupils.push(pupil);
+    iris.position.z = 1.58;
+    eyeGroup.add(iris);
+    const pupil = new THREE.Mesh(
+      new THREE.SphereGeometry(0.62, 20, 14),
+      new THREE.MeshBasicMaterial({ color: 0x0b0602 })
+    );
+    pupil.position.z = 1.62;
+    pupil.scale.set(0.5, 1.0, 0.24);
+    pupil.userData.baseX = 0.5;
+    eyeGroup.add(pupil);
+    socket.add(eyeGroup);
+    group.add(socket);
 
-    const lid = new THREE.Mesh(new THREE.SphereGeometry(1.85, 24, 16), gold);
-    lid.position.copy(eye.position);
-    lid.position.z += 0.15;
-    lid.scale.set(1.05, 0.12, 1.05);
+    const lid = new THREE.Mesh(new THREE.SphereGeometry(1.78, 28, 20), M.fur);
+    lid.position.set(side * 3.7, 2.25, 7.35);
+    lid.scale.set(1.05, 0.12, 1.0);
     lid.visible = false;
     group.add(lid);
-    if (side === -1) bindings.eyelidL = lid;
-    else bindings.eyelidR = lid;
+
+    bindings.eyeMats.push(eyeMat, iris.material);
+    bindings.pupils.push(pupil);
+    if (side === -1) {
+      bindings.eyeGroupL = eyeGroup;
+      bindings.eyelidL = lid;
+    } else {
+      bindings.eyeGroupR = eyeGroup;
+      bindings.eyelidR = lid;
+    }
   }
 
-  // Brow ridges.
-  bindings.browRestY = 3.6;
+  /* Brow ridges. */
+  bindings.browRestY = 4.15;
   for (const side of [-1, 1]) {
-    const brow = new THREE.Mesh(new THREE.SphereGeometry(2.0, 20, 14), gold);
-    brow.position.set(side * 4.0, bindings.browRestY, 6.4);
-    brow.scale.set(1.3, 0.42, 0.8);
+    const brow = new THREE.Mesh(
+      furDisplace(new THREE.SphereGeometry(1.9, 32, 22), 0.02, 1.5),
+      M.fur
+    );
+    brow.position.set(side * 3.8, bindings.browRestY, 6.6);
+    brow.scale.set(1.35, 0.42, 0.72);
     group.add(brow);
     if (side === -1) bindings.browL = brow;
     else bindings.browR = brow;
   }
 
-  // Ears — pivoted groups so springs rotate them naturally.
+  /* Ears: rounded solid tiger ears with dark inner cups. */
   for (const side of [-1, 1]) {
     const earGroup = new THREE.Group();
-    earGroup.position.set(side * 6.8, 7.6, -1.5);
-    earGroup.rotation.z = side * -0.35;
-    const outer = new THREE.Mesh(new THREE.ConeGeometry(2.6, 4.6, 24), gold);
-    outer.scale.z = 0.55;
-    outer.position.y = 2.3;
+    earGroup.position.set(side * 6.9, 6.8, -1.2);
+    earGroup.rotation.set(0.1, 0, side * -0.3);
+    const outer = new THREE.Mesh(
+      furDisplace(new THREE.SphereGeometry(3.3, 40, 30), 0.02, 1.2),
+      M.fur
+    );
+    outer.scale.set(1.0, 1.3, 0.42);
+    outer.position.y = 2.2;
     earGroup.add(outer);
-    const inner = new THREE.Mesh(new THREE.ConeGeometry(1.6, 3.2, 20), darkGold);
-    inner.scale.z = 0.4;
-    inner.position.set(0, 1.9, 0.7);
-    earGroup.add(inner);
+    const innerEar = new THREE.Mesh(new THREE.SphereGeometry(2.3, 28, 20), M.darkGold);
+    innerEar.scale.set(0.78, 1.0, 0.3);
+    innerEar.position.set(0, 2.0, 1.1);
+    earGroup.add(innerEar);
     group.add(earGroup);
     if (side === -1) {
       bindings.earL = earGroup;
-      bindings.earLRest = 0;
+      bindings.earLRest = earGroup.rotation.x;
     } else {
       bindings.earR = earGroup;
-      bindings.earRRest = 0;
+      bindings.earRRest = earGroup.rotation.x;
     }
   }
 
-  // Whiskers — metal wires as thin curved tubes, grouped per side for springs.
-  const whiskerMat = new THREE.MeshPhysicalMaterial({
-    color: 0xfff3c4,
-    metalness: 1,
-    roughness: 0.1,
-  });
+  /* Whiskers: 6 muzzle wires + 2 brow wires per side. */
   for (const side of [-1, 1]) {
     const wGroup = new THREE.Group();
-    wGroup.position.set(side * 3.4, -2.2, 8.6);
-    for (let i = 0; i < 4; i++) {
-      const spread = (i - 1.5) * 0.28;
+    wGroup.position.set(side * 3.3, -2.0, 8.2);
+    for (let i = 0; i < 6; i++) {
+      const spread = (i - 2.5) * 0.45;
+      const len = 9 + (i % 3) * 2 + i * 0.4;
       const curve = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(0, 0, 0),
-        new THREE.Vector3(side * 4.5, spread * 2.0 + 0.4, 1.2),
-        new THREE.Vector3(side * 9.5, spread * 5.0, 0.6),
+        new THREE.Vector3(0, spread * 0.25, 0),
+        new THREE.Vector3(side * len * 0.45, spread * 1.3 + 0.3, 1.1),
+        new THREE.Vector3(side * len, spread * 2.6 - 0.6, 0.2),
       ]);
-      const tube = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, 12, 0.09, 6),
-        whiskerMat
-      );
-      wGroup.add(tube);
+      wGroup.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 14, 0.075, 6), M.whisker));
     }
     group.add(wGroup);
     if (side === -1) bindings.whiskersL = wGroup;
@@ -388,10 +643,10 @@ export function buildProceduralTiger(mapping) {
   // bridge. Nudge the head back and up so it wraps the real skull.
   group.position.set(0, 1.0, -2.0);
 
-  const inner = new THREE.Group();
-  inner.add(group);
-  inner.name = "TigerHeadRoot";
-  return new TigerHead(inner, bindings, mapping);
+  const root = new THREE.Group();
+  root.add(group);
+  root.name = "TigerHeadRoot";
+  return new TigerHead(root, bindings, mapping);
 }
 
 /**
@@ -423,13 +678,13 @@ export async function loadTigerModel(modelPath, mapping) {
         if (o.name === "whiskers_R") bindings.whiskersR = o;
       }
     });
-    const inner = new THREE.Group();
-    inner.add(root);
-    inner.name = "TigerHeadRoot";
+    const wrapper = new THREE.Group();
+    wrapper.add(root);
+    wrapper.name = "TigerHeadRoot";
     console.info(
       `[AuruMask] Loaded model ${modelPath}: ${bindings.morphMeshes.length} morph mesh(es).`
     );
-    return new TigerHead(inner, bindings, mapping);
+    return new TigerHead(wrapper, bindings, mapping);
   } catch (err) {
     console.warn(
       `[AuruMask] Failed to load ${modelPath} (${err.message}); using procedural placeholder.`

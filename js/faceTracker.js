@@ -18,7 +18,10 @@ export class FaceTracker {
     this.landmarker = null;
     this.shapeFilters = new Map();
     for (const name of ARKIT_BLENDSHAPES) {
-      this.shapeFilters.set(name, new OneEuroFilter(4.0, 0.08));
+      // Jaw and mouth channels get a hot beta so speech stays in lip-sync
+      // even when the smoothing slider is up; brows/eyes can afford lag.
+      const fast = name.startsWith("jaw") || name.startsWith("mouth");
+      this.shapeFilters.set(name, new OneEuroFilter(4.0, fast ? 0.35 : 0.08));
     }
     // Head translation gets its own filters; rotation is smoothed downstream
     // by the renderer via quaternion slerp using the same strength.
