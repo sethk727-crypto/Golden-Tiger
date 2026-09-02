@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "comment": "AuruMask persona mapping. Edit and redeploy — no code changes needed. Gains scale raw blendshape coefficients before they hit the model; unlisted shapes default to 1.0. Spring constants: stiffness is the spring constant k (pull toward rest, 1/s^2), damping is the velocity drag c (1/s). Metal whiskers = high stiffness, low damping (they ring); furry ears = moderate stiffness, higher damping (they settle).",
+  "gains": {
+    "jawOpen": 1.0,
+    "browDownLeft": 1.15,
+    "browDownRight": 1.15,
+    "browInnerUp": 1.1,
+    "eyeBlinkLeft": 1.05,
+    "eyeBlinkRight": 1.05,
+    "mouthSmileLeft": 0.9,
+    "mouthSmileRight": 0.9
+  },
+  "jaw": {
+    "baseRadians": 0.5,
+    "additiveThreshold": 0.7,
+    "roarExtraRadians": 0.38
+  },
+  "ears": {
+    "flattenFromBrowDown": 1.0,
+    "perkFromBrowInnerUp": 0.8,
+    "flattenRadians": 0.9,
+    "perkRadians": 0.35
+  },
+  "roar": {
+    "threshold": 0.8,
+    "holdMs": 250,
+    "attackMs": 120,
+    "releaseMs": 400
+  },
+  "springs": {
+    "ear": { "stiffness": 140, "damping": 16 },
+    "whisker": { "stiffness": 420, "damping": 6 }
+  },
+  "headVelocityToImpulse": {
+    "ear": 0.06,
+    "whisker": 0.12
+  }
+}
